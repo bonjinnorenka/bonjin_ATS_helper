@@ -1,0 +1,22 @@
+pub mod auth;
+pub mod client;
+pub mod entity;
+pub mod error;
+pub mod query;
+
+pub(crate) mod codec;
+pub(crate) mod http;
+pub(crate) mod request;
+pub(crate) mod validation;
+
+pub use auth::{Credential, SasCredential, SharedKeyCredential};
+pub use client::{
+    ClientOptions, DEFAULT_STORAGE_API_VERSION, IfMatch, MetadataLevel, TableClient,
+    TableServiceClient,
+};
+pub use entity::{DynamicEntity, EntityProperty, EntitySystemProperties, TableEntity};
+pub use error::{
+    AuthError, Error, Result, SerializationError, ServiceError, ServiceErrorKind, TransportError,
+    UnexpectedResponseError, ValidationError,
+};
+pub use query::{ContinuationToken, OriginalQuery, Query, QueryBuilder, QueryPage};
