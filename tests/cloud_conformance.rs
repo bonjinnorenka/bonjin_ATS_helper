@@ -11,15 +11,13 @@ async fn cloud_conformance_smoke_test() {
         .unwrap_or_else(|_| format!("CloudTest{}", std::process::id()));
 
     let credential: Credential = if let Ok(sas) = std::env::var("ATS_CLOUD_SAS") {
-        SasCredential::new(sas).unwrap().into()
+        Credential::from(SasCredential::new(sas).unwrap())
     } else {
         let account_name = std::env::var("ATS_ACCOUNT_NAME")
             .expect("ATS_ACCOUNT_NAME is required when SAS is absent");
         let account_key = std::env::var("ATS_ACCOUNT_KEY")
             .expect("ATS_ACCOUNT_KEY is required when SAS is absent");
-        SharedKeyCredential::new(account_name, account_key)
-            .unwrap()
-            .into()
+        Credential::from(SharedKeyCredential::new(account_name, account_key).unwrap())
     };
 
     let service = TableServiceClient::new(endpoint, credential, ClientOptions::default()).unwrap();

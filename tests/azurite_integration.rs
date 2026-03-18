@@ -5,6 +5,10 @@ use bonjin_ATS_helper::{
 #[tokio::test]
 #[ignore = "requires a running Azurite Table endpoint"]
 async fn azurite_crud_roundtrip() {
+    if std::env::var("ATS_CLOUD_ENDPOINT").is_ok() && std::env::var("AZURITE_TABLE_ENDPOINT").is_err() {
+        return;
+    }
+
     let endpoint = std::env::var("AZURITE_TABLE_ENDPOINT")
         .unwrap_or_else(|_| "http://127.0.0.1:10002/devstoreaccount1".to_owned());
     let account_name =
