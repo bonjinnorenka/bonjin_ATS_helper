@@ -15,6 +15,9 @@ impl ReqwestTransport {
         if let Some(timeout) = options.timeout {
             builder = builder.timeout(timeout);
         }
+        if let Some(timeout) = options.connect_timeout {
+            builder = builder.connect_timeout(timeout);
+        }
         if let Some(user_agent) = &options.user_agent {
             builder = builder.user_agent(user_agent.clone());
         }

@@ -5,7 +5,7 @@ use url::Url;
 
 use crate::{
     auth::Credential,
-    client::ClientOptions,
+    client::{ClientOptions, validate_storage_api_version},
     error::Result,
     http::{reqwest_client::ReqwestTransport, response::Response},
     request::{
@@ -31,6 +31,7 @@ pub(crate) struct RequestPipeline {
 
 impl RequestPipeline {
     pub(crate) fn new(credential: Credential, options: ClientOptions) -> Result<Self> {
+        validate_storage_api_version(&options.storage_api_version)?;
         let transport = ReqwestTransport::new(&options)?;
         Ok(Self {
             credential,
@@ -60,8 +61,11 @@ impl RequestPipeline {
         );
         headers.insert(
             X_MS_VERSION,
-            HeaderValue::from_str(&self.options.storage_api_version)
-                .expect("storage API version is always a valid header"),
+            HeaderValue::from_str(&self.options.storage_api_version).map_err(|_| {
+                crate::error::ValidationError::InvalidClientOption(
+                    "storage API version must be a valid HTTP header value".to_owned(),
+                )
+            })?,
         );
         headers.insert(
             X_MS_DATE,
@@ -111,4 +115,49 @@ fn format_http_date(value: OffsetDateTime) -> Result<String> {
         .to_offset(time::UtcOffset::UTC)
         .format(RFC1123_FORMAT)
         .map_err(|error| crate::error::SerializationError::DateTime(error.to_string()).into())
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use http::{HeaderMap, Method};
+    use url::Url;
+
+    use crate::{auth::SasCredential, client::ClientOptions};
+
+    use super::RequestPipeline;
+
+    #[test]
+    fn invalid_storage_api_version_returns_error_instead_of_panicking() {
+        let pipeline = RequestPipeline::new(
+            SasCredential::new("sv=1&sig=abc").unwrap().into(),
+            ClientOptions::default().with_service_version("2026-02-06\r\nx-bad: 1"),
+        );
+
+        assert!(matches!(
+            pipeline,
+            Err(crate::error::Error::Validation(
+                crate::error::ValidationError::InvalidClientOption(_)
+            ))
+        ));
+    }
+
+    #[test]
+    fn prepare_request_accepts_valid_storage_api_version() {
+        let pipeline = RequestPipeline::new(
+            SasCredential::new("sv=1&sig=abc").unwrap().into(),
+            ClientOptions::default(),
+        )
+        .unwrap();
+
+        let prepared = pipeline.prepare_request(
+            Method::GET,
+            Url::parse("https://example.table.core.windows.net/Tables").unwrap(),
+            Bytes::new(),
+            None,
+            HeaderMap::new(),
+        );
+
+        assert!(prepared.is_ok());
+    }
 }

@@ -11,8 +11,8 @@ pub(crate) mod validation;
 
 pub use auth::{Credential, SasCredential, SharedKeyCredential};
 pub use client::{
-    ClientOptions, DEFAULT_STORAGE_API_VERSION, IfMatch, MetadataLevel, TableClient,
-    TableServiceClient,
+    ClientOptions, DEFAULT_CONNECT_TIMEOUT, DEFAULT_REQUEST_TIMEOUT, DEFAULT_STORAGE_API_VERSION,
+    IfMatch, MetadataLevel, TableClient, TableServiceClient,
 };
 pub use entity::{DynamicEntity, EntityProperty, EntitySystemProperties, TableEntity};
 pub use error::{

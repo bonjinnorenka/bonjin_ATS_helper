@@ -36,7 +36,8 @@ pub enum TransportError {
 }
 
 impl From<reqwest::Error> for TransportError {
-    fn from(value: reqwest::Error) -> Self {
+    fn from(mut value: reqwest::Error) -> Self {
+        sanitize_reqwest_error_url(&mut value);
         Self::RequestFailed {
             message: value.to_string(),
         }
@@ -71,6 +72,8 @@ pub enum ValidationError {
     InvalidQuery(String),
     #[error("invalid sas token: {0}")]
     InvalidSas(String),
+    #[error("invalid client option: {0}")]
+    InvalidClientOption(String),
     #[error("entity validation failed: {0}")]
     EntityLimit(String),
 }
@@ -223,4 +226,33 @@ fn format_message_suffix(message: Option<&str>) -> String {
     message
         .map(|message| format!(": {message}"))
         .unwrap_or_default()
+}
+
+fn sanitize_reqwest_error_url(error: &mut reqwest::Error) {
+    if let Some(url) = error.url_mut() {
+        url.set_query(None);
+        url.set_fragment(None);
+        let _ = url.set_password(None);
+        let _ = url.set_username("");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::TransportError;
+
+    #[tokio::test]
+    async fn reqwest_errors_redact_query_parameters() {
+        let error = reqwest::Client::new()
+            .get("blob://example.table.core.windows.net/Tables?sv=1&sig=secret")
+            .send()
+            .await
+            .unwrap_err();
+
+        let message = TransportError::from(error).to_string();
+
+        assert!(message.contains("blob://example.table.core.windows.net/Tables"));
+        assert!(!message.contains("sig=secret"));
+        assert!(!message.contains("sv=1"));
+    }
 }

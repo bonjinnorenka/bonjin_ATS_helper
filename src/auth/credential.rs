@@ -1,4 +1,7 @@
+use std::fmt;
+
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use zeroize::Zeroizing;
 
 use crate::{
     error::{AuthError, Result, ValidationError},
@@ -7,10 +10,19 @@ use crate::{
 
 use super::{apply_sas_credential, apply_shared_key_credential};
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub enum Credential {
     SharedKey(SharedKeyCredential),
     Sas(SasCredential),
+}
+
+impl fmt::Debug for Credential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::SharedKey(credential) => f.debug_tuple("SharedKey").field(credential).finish(),
+            Self::Sas(credential) => f.debug_tuple("Sas").field(credential).finish(),
+        }
+    }
 }
 
 impl From<SharedKeyCredential> for Credential {
@@ -44,10 +56,19 @@ impl Credential {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SharedKeyCredential {
     account_name: String,
-    account_key: Vec<u8>,
+    account_key: Zeroizing<Vec<u8>>,
+}
+
+impl fmt::Debug for SharedKeyCredential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SharedKeyCredential")
+            .field("account_name", &self.account_name)
+            .field("account_key", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl SharedKeyCredential {
@@ -66,7 +87,7 @@ impl SharedKeyCredential {
 
         Ok(Self {
             account_name,
-            account_key,
+            account_key: Zeroizing::new(account_key),
         })
     }
 
@@ -75,34 +96,69 @@ impl SharedKeyCredential {
     }
 
     pub(crate) fn account_key(&self) -> &[u8] {
-        &self.account_key
+        self.account_key.as_slice()
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct SasCredential {
-    raw_query: String,
+    raw_query: Zeroizing<String>,
+}
+
+impl fmt::Debug for SasCredential {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("SasCredential")
+            .field("raw_query", &"[REDACTED]")
+            .finish()
+    }
 }
 
 impl SasCredential {
     pub fn new(raw_query: impl Into<String>) -> Result<Self> {
-        let raw_query = raw_query.into();
-        let raw_query = raw_query.trim().trim_start_matches('?').to_owned();
-        if raw_query.is_empty() {
+        let raw_query = Zeroizing::new(raw_query.into());
+        let trimmed = raw_query.trim().trim_start_matches('?');
+        if trimmed.is_empty() {
             return Err(ValidationError::InvalidSas("sas token cannot be empty".to_owned()).into());
         }
 
-        if !raw_query.contains('=') {
+        if !trimmed.contains('=') {
             return Err(ValidationError::InvalidSas(
                 "sas token must contain key=value pairs".to_owned(),
             )
             .into());
         }
 
-        Ok(Self { raw_query })
+        Ok(Self {
+            raw_query: Zeroizing::new(trimmed.to_owned()),
+        })
     }
 
     pub(crate) fn raw_query(&self) -> &str {
-        &self.raw_query
+        self.raw_query.as_str()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Credential, SasCredential, SharedKeyCredential};
+
+    #[test]
+    fn shared_key_debug_redacts_account_key() {
+        let credential = SharedKeyCredential::new("account", "AQIDBA==").unwrap();
+        let debug = format!("{credential:?}");
+
+        assert!(debug.contains("account"));
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains("AQIDBA=="));
+        assert!(!debug.contains("1, 2, 3, 4"));
+    }
+
+    #[test]
+    fn sas_debug_redacts_raw_query_from_wrapped_credential() {
+        let credential = Credential::from(SasCredential::new("sv=1&sig=secret").unwrap());
+        let debug = format!("{credential:?}");
+
+        assert!(debug.contains("[REDACTED]"));
+        assert!(!debug.contains("sig=secret"));
     }
 }

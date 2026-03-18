@@ -5,7 +5,9 @@ use bonjin_ATS_helper::{
 #[tokio::test]
 #[ignore = "requires a running Azurite Table endpoint"]
 async fn azurite_crud_roundtrip() {
-    if std::env::var("ATS_CLOUD_ENDPOINT").is_ok() && std::env::var("AZURITE_TABLE_ENDPOINT").is_err() {
+    if std::env::var("ATS_CLOUD_ENDPOINT").is_ok()
+        && std::env::var("AZURITE_TABLE_ENDPOINT").is_err()
+    {
         return;
     }
 

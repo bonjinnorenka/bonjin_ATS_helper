@@ -2,7 +2,7 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use http::{HeaderMap, Method, StatusCode};
-use url::Url;
+use url::{Host, Url};
 
 use crate::{
     auth::Credential,
@@ -29,7 +29,7 @@ impl TableServiceClient {
         credential: impl Into<Credential>,
         options: ClientOptions,
     ) -> Result<Self> {
-        let endpoint = normalize_endpoint(endpoint.as_ref())?;
+        let endpoint = normalize_endpoint(endpoint.as_ref(), options.allow_insecure_http)?;
         let pipeline = RequestPipeline::new(credential.into(), options)?;
 
         Ok(Self {
@@ -134,14 +134,25 @@ impl TableServiceClient {
     }
 }
 
-fn normalize_endpoint(raw: &str) -> Result<Url> {
+fn normalize_endpoint(raw: &str, allow_insecure_http: bool) -> Result<Url> {
     let mut endpoint =
         Url::parse(raw).map_err(|error| ValidationError::InvalidEndpoint(error.to_string()))?;
 
-    if !matches!(endpoint.scheme(), "http" | "https") {
-        return Err(
-            ValidationError::InvalidEndpoint("endpoint must use http or https".to_owned()).into(),
-        );
+    match endpoint.scheme() {
+        "https" => {}
+        "http" if allow_insecure_http || is_loopback_host(&endpoint) => {}
+        "http" => {
+            return Err(ValidationError::InvalidEndpoint(
+                "http endpoints are only allowed for loopback hosts or when ClientOptions::with_insecure_http_allowed(true) is set".to_owned(),
+            )
+            .into());
+        }
+        _ => {
+            return Err(ValidationError::InvalidEndpoint(
+                "endpoint must use http or https".to_owned(),
+            )
+            .into());
+        }
     }
 
     let normalized_path = if endpoint.path().is_empty() || endpoint.path() == "/" {
@@ -154,9 +165,18 @@ fn normalize_endpoint(raw: &str) -> Result<Url> {
     Ok(endpoint)
 }
 
+fn is_loopback_host(endpoint: &Url) -> bool {
+    match endpoint.host() {
+        Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
+        Some(Host::Ipv4(address)) => address.is_loopback(),
+        Some(Host::Ipv6(address)) => address.is_loopback(),
+        None => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use crate::{auth::SasCredential, client::ClientOptions};
+    use crate::{auth::SasCredential, client::ClientOptions, error::ValidationError};
 
     use super::TableServiceClient;
 
@@ -172,6 +192,51 @@ mod tests {
         assert_eq!(
             client.join_relative("Tables").unwrap().as_str(),
             "https://example.table.core.windows.net/Tables"
+        );
+    }
+
+    #[test]
+    fn rejects_non_loopback_http_by_default() {
+        let result = TableServiceClient::new(
+            "http://example.table.core.windows.net",
+            SasCredential::new("sv=1&sig=abc").unwrap(),
+            ClientOptions::default(),
+        );
+
+        assert!(matches!(
+            result,
+            Err(crate::error::Error::Validation(ValidationError::InvalidEndpoint(message)))
+                if message.contains("with_insecure_http_allowed")
+        ));
+    }
+
+    #[test]
+    fn allows_non_loopback_http_when_explicitly_enabled() {
+        let client = TableServiceClient::new(
+            "http://example.table.core.windows.net",
+            SasCredential::new("sv=1&sig=abc").unwrap(),
+            ClientOptions::default().with_insecure_http_allowed(true),
+        )
+        .unwrap();
+
+        assert_eq!(
+            client.join_relative("Tables").unwrap().as_str(),
+            "http://example.table.core.windows.net/Tables"
+        );
+    }
+
+    #[test]
+    fn allows_loopback_http_for_local_emulators() {
+        let client = TableServiceClient::new(
+            "http://127.0.0.1:10002/devstoreaccount1",
+            SasCredential::new("sv=1&sig=abc").unwrap(),
+            ClientOptions::default(),
+        )
+        .unwrap();
+
+        assert_eq!(
+            client.join_relative("Tables").unwrap().as_str(),
+            "http://127.0.0.1:10002/devstoreaccount1/Tables"
         );
     }
 }

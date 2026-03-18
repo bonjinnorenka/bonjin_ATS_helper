@@ -154,9 +154,12 @@ let fetched = table.get_dynamic_entity("user", "123").await?;
 - Storage API version
 - metadata level
 - user agent
-- timeout
+- request timeout
+- connect timeout
+- insecure HTTP allowance
 
-既定の Storage API version は `2026-02-06` です。
+既定の Storage API version は `2026-02-06`、request timeout は 30 秒、connect timeout は 10 秒です。
+`http://` エンドポイントはデフォルトでは loopback (`localhost`, `127.0.0.1`, `::1`) のみ許可されます。非 loopback な HTTP を使う場合は `ClientOptions::with_insecure_http_allowed(true)` を明示してください。
 
 ## 認証
 
