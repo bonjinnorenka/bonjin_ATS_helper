@@ -22,6 +22,12 @@ pub(crate) fn validate_table_name(table_name: &str) -> Result<(), ValidationErro
         ));
     }
 
+    if table_name.eq_ignore_ascii_case("tables") {
+        return Err(ValidationError::InvalidTableName(
+            "table name 'tables' is reserved".to_owned(),
+        ));
+    }
+
     Ok(())
 }
 
@@ -34,5 +40,6 @@ mod tests {
         assert!(validate_table_name("ab").is_err());
         assert!(validate_table_name("1table").is_err());
         assert!(validate_table_name("bad-name").is_err());
+        assert!(validate_table_name("tables").is_err());
     }
 }

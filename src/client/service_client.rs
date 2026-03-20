@@ -1,15 +1,11 @@
 use std::sync::Arc;
 
-use bytes::Bytes;
-use http::{HeaderMap, Method, StatusCode};
-use url::{Host, Url};
-
 use crate::{
     auth::Credential,
+    backend::{Backend, http::HttpBackend, mock::MockBackend},
     client::{ClientOptions, TableClient},
-    codec::deserialize::table_names_from_body,
-    error::{Result, SerializationError, ServiceErrorKind, ValidationError, ensure_status},
-    request::pipeline::RequestPipeline,
+    error::Result,
+    mock::MockOptions,
     validation::table_name::validate_table_name,
 };
 
@@ -19,8 +15,7 @@ pub struct TableServiceClient {
 }
 
 struct ServiceClientInner {
-    endpoint: Url,
-    pipeline: RequestPipeline,
+    backend: Arc<dyn Backend>,
 }
 
 impl TableServiceClient {
@@ -29,12 +24,13 @@ impl TableServiceClient {
         credential: impl Into<Credential>,
         options: ClientOptions,
     ) -> Result<Self> {
-        let endpoint = normalize_endpoint(endpoint.as_ref(), options.allow_insecure_http)?;
-        let pipeline = RequestPipeline::new(credential.into(), options)?;
+        let backend = HttpBackend::new(endpoint.as_ref(), credential.into(), options)?;
+        Ok(Self::from_backend(Arc::new(backend)))
+    }
 
-        Ok(Self {
-            inner: Arc::new(ServiceClientInner { endpoint, pipeline }),
-        })
+    pub fn new_mock(options: MockOptions) -> Result<Self> {
+        let backend = MockBackend::new(options)?;
+        Ok(Self::from_backend(Arc::new(backend)))
     }
 
     pub fn table_client(&self, table_name: impl Into<String>) -> Result<TableClient> {
@@ -45,31 +41,15 @@ impl TableServiceClient {
 
     pub async fn create_table(&self, table_name: &str) -> Result<()> {
         validate_table_name(table_name)?;
-        let url = self.join_relative("Tables")?;
-        let body = Bytes::from(
-            serde_json::to_vec(&serde_json::json!({
-                "TableName": table_name
-            }))
-            .map_err(SerializationError::from)?,
-        );
-        let prepared = self.inner.pipeline.prepare_request(
-            Method::POST,
-            url,
-            body,
-            Some("application/json"),
-            HeaderMap::new(),
-        )?;
-        let response = self.inner.pipeline.send(prepared).await?;
-        ensure_status(response, &[StatusCode::CREATED], "create table")?;
-        Ok(())
+        self.inner.backend.create_table(table_name).await
     }
 
     pub async fn create_table_if_not_exists(&self, table_name: &str) -> Result<bool> {
         match self.create_table(table_name).await {
             Ok(()) => Ok(true),
             Err(crate::error::Error::Service(error))
-                if error.kind == ServiceErrorKind::TableAlreadyExists
-                    || error.status == StatusCode::CONFLICT =>
+                if error.kind == crate::error::ServiceErrorKind::TableAlreadyExists
+                    || error.status == http::StatusCode::CONFLICT =>
             {
                 Ok(false)
             }
@@ -79,164 +59,24 @@ impl TableServiceClient {
 
     pub async fn delete_table(&self, table_name: &str) -> Result<()> {
         validate_table_name(table_name)?;
-        let url = self.join_relative(&format!("Tables('{table_name}')"))?;
-        let prepared = self.inner.pipeline.prepare_request(
-            Method::DELETE,
-            url,
-            Bytes::new(),
-            None,
-            HeaderMap::new(),
-        )?;
-        let response = self.inner.pipeline.send(prepared).await?;
-        ensure_status(response, &[StatusCode::NO_CONTENT], "delete table")?;
-        Ok(())
+        self.inner.backend.delete_table(table_name).await
     }
 
     pub async fn list_tables(&self) -> Result<Vec<String>> {
-        let url = self.join_relative("Tables")?;
-        let prepared = self.inner.pipeline.prepare_request(
-            Method::GET,
-            url,
-            Bytes::new(),
-            None,
-            HeaderMap::new(),
-        )?;
-        let response = self.inner.pipeline.send(prepared).await?;
-        let response = ensure_status(response, &[StatusCode::OK], "list tables")?;
-        table_names_from_body(&response.body)
+        self.inner.backend.list_tables().await
     }
 
-    pub(crate) fn join_relative(&self, relative: &str) -> Result<Url> {
-        self.inner
-            .endpoint
-            .join(relative)
-            .map_err(|error| ValidationError::InvalidEndpoint(error.to_string()).into())
+    pub async fn flush(&self) -> Result<()> {
+        self.inner.backend.flush().await
     }
 
-    pub(crate) async fn send(
-        &self,
-        prepared: crate::request::prepared_request::PreparedRequest,
-    ) -> Result<crate::http::response::Response> {
-        self.inner.pipeline.send(prepared).await
+    pub(crate) fn backend(&self) -> &Arc<dyn Backend> {
+        &self.inner.backend
     }
 
-    pub(crate) fn prepare_request(
-        &self,
-        method: Method,
-        url: Url,
-        body: Bytes,
-        content_type: Option<&str>,
-        extra_headers: HeaderMap,
-    ) -> Result<crate::request::prepared_request::PreparedRequest> {
-        self.inner
-            .pipeline
-            .prepare_request(method, url, body, content_type, extra_headers)
-    }
-}
-
-fn normalize_endpoint(raw: &str, allow_insecure_http: bool) -> Result<Url> {
-    let mut endpoint =
-        Url::parse(raw).map_err(|error| ValidationError::InvalidEndpoint(error.to_string()))?;
-
-    match endpoint.scheme() {
-        "https" => {}
-        "http" if allow_insecure_http || is_loopback_host(&endpoint) => {}
-        "http" => {
-            return Err(ValidationError::InvalidEndpoint(
-                "http endpoints are only allowed for loopback hosts or when ClientOptions::with_insecure_http_allowed(true) is set".to_owned(),
-            )
-            .into());
+    fn from_backend(backend: Arc<dyn Backend>) -> Self {
+        Self {
+            inner: Arc::new(ServiceClientInner { backend }),
         }
-        _ => {
-            return Err(ValidationError::InvalidEndpoint(
-                "endpoint must use http or https".to_owned(),
-            )
-            .into());
-        }
-    }
-
-    let normalized_path = if endpoint.path().is_empty() || endpoint.path() == "/" {
-        "/".to_owned()
-    } else {
-        format!("{}/", endpoint.path().trim_end_matches('/'))
-    };
-    endpoint.set_path(&normalized_path);
-
-    Ok(endpoint)
-}
-
-fn is_loopback_host(endpoint: &Url) -> bool {
-    match endpoint.host() {
-        Some(Host::Domain(domain)) => domain.eq_ignore_ascii_case("localhost"),
-        Some(Host::Ipv4(address)) => address.is_loopback(),
-        Some(Host::Ipv6(address)) => address.is_loopback(),
-        None => false,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::{auth::SasCredential, client::ClientOptions, error::ValidationError};
-
-    use super::TableServiceClient;
-
-    #[test]
-    fn normalizes_endpoints_with_trailing_slash() {
-        let client = TableServiceClient::new(
-            "https://example.table.core.windows.net",
-            SasCredential::new("sv=1&sig=abc").unwrap(),
-            ClientOptions::default(),
-        )
-        .unwrap();
-
-        assert_eq!(
-            client.join_relative("Tables").unwrap().as_str(),
-            "https://example.table.core.windows.net/Tables"
-        );
-    }
-
-    #[test]
-    fn rejects_non_loopback_http_by_default() {
-        let result = TableServiceClient::new(
-            "http://example.table.core.windows.net",
-            SasCredential::new("sv=1&sig=abc").unwrap(),
-            ClientOptions::default(),
-        );
-
-        assert!(matches!(
-            result,
-            Err(crate::error::Error::Validation(ValidationError::InvalidEndpoint(message)))
-                if message.contains("with_insecure_http_allowed")
-        ));
-    }
-
-    #[test]
-    fn allows_non_loopback_http_when_explicitly_enabled() {
-        let client = TableServiceClient::new(
-            "http://example.table.core.windows.net",
-            SasCredential::new("sv=1&sig=abc").unwrap(),
-            ClientOptions::default().with_insecure_http_allowed(true),
-        )
-        .unwrap();
-
-        assert_eq!(
-            client.join_relative("Tables").unwrap().as_str(),
-            "http://example.table.core.windows.net/Tables"
-        );
-    }
-
-    #[test]
-    fn allows_loopback_http_for_local_emulators() {
-        let client = TableServiceClient::new(
-            "http://127.0.0.1:10002/devstoreaccount1",
-            SasCredential::new("sv=1&sig=abc").unwrap(),
-            ClientOptions::default(),
-        )
-        .unwrap();
-
-        assert_eq!(
-            client.join_relative("Tables").unwrap().as_str(),
-            "http://127.0.0.1:10002/devstoreaccount1/Tables"
-        );
     }
 }

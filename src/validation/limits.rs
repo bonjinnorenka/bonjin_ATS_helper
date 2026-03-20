@@ -4,6 +4,12 @@ pub(crate) fn validate_entity_limit_constraints(
     entity: &DynamicEntity,
     estimated_payload_size: usize,
 ) -> Result<(), ValidationError> {
+    if entity.properties.len() > 252 {
+        return Err(ValidationError::EntityLimit(
+            "entity cannot contain more than 252 custom properties".to_owned(),
+        ));
+    }
+
     let property_count = entity.properties.len() + 3;
     if property_count > 255 {
         return Err(ValidationError::EntityLimit(

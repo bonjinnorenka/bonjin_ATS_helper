@@ -1,4 +1,7 @@
+pub mod mock;
+
 pub mod auth;
+pub(crate) mod backend;
 pub mod client;
 pub mod entity;
 pub mod error;
@@ -19,4 +22,5 @@ pub use error::{
     AuthError, Error, Result, SerializationError, ServiceError, ServiceErrorKind, TransportError,
     UnexpectedResponseError, ValidationError,
 };
+pub use mock::{DurabilityMode, FlushPolicy, MockOptions};
 pub use query::{ContinuationToken, OriginalQuery, Query, QueryBuilder, QueryPage};

@@ -2,6 +2,7 @@
 
 Rust から Azure Table Storage を扱うためのクライアントライブラリです。
 `TableServiceClient` と `TableClient` を中心に、テーブル操作、Entity 操作、型付き API、動的 Entity API を提供します。
+real ATS backend と永続化 mock backend を同じ client API で切り替えられます。
 
 ## 特徴
 
@@ -9,6 +10,7 @@ Rust から Azure Table Storage を扱うためのクライアントライブラ
 - Shared Key 認証と SAS 認証に対応
 - 型付き Entity と `DynamicEntity` の両方を扱える
 - テーブル CRUD、Entity CRUD、upsert、query、paging をサポート
+- 永続化 mock backend をサポート
 - `reqwest` の型を公開 API に出さない設計
 - `rustls-tls` を既定で有効化
 
@@ -72,6 +74,29 @@ let table = service.table_client("Users")?;
 table.create_if_not_exists().await?;
 ```
 
+### 2b. 永続化 mock backend を使う
+
+```rust
+use bonjin_ATS_helper::{MockOptions, TableServiceClient};
+
+let service = TableServiceClient::new_mock(
+    MockOptions::new("./.ats-mock")
+)?;
+
+let table = service.table_client("Users")?;
+table.create_if_not_exists().await?;
+```
+
+`MockOptions` では以下を設定できます。
+
+- `root_path`
+- `auto_create_if_missing`。root directory と `manifest.json` を自動作成するかを制御します。存在しないテーブルは自動作成しません。
+- `strict_mode`。既定は `true` です。
+- `flush_policy`。既定は `FlushPolicy::WriteThrough` です。
+- `durability_mode`。既定は `DurabilityMode::Fast` です。
+
+`FlushPolicy::Manual` を使う場合は `service.flush().await?` で明示的に永続化します。
+
 ### 3. 型付き Entity を扱う
 
 ```rust
@@ -125,11 +150,13 @@ let fetched = table.get_dynamic_entity("user", "123").await?;
 ### `TableServiceClient`
 
 - `new(endpoint, credential, options)`
+- `new_mock(options)`
 - `table_client(name)`
 - `create_table`
 - `create_table_if_not_exists`
 - `delete_table`
 - `list_tables`
+- `flush`
 
 ### `TableClient`
 
@@ -173,8 +200,16 @@ let fetched = table.get_dynamic_entity("user", "123").await?;
 ## テストと開発
 
 このクレートは `wiremock` を使った HTTP レベルのテストを前提にしています。
+mock backend 向けには `tempfile` を使った永続化テストと、環境変数がある場合のみ動く real/mock 比較テストを用意しています。
 
 ローカルで確認する場合は通常の Azure Table Storage か Azurite を使えますが、機能差があるため、最終確認は実際の Azure 環境でも行うのが安全です。
+
+## mock backend の差分
+
+- query の `$filter` は real/mock 共通の parser / evaluator を使います。
+- ETag は opaque です。real/mock 比較で exact string を比較してはいけません。
+- delete table の tombstone 状態は v1 では再現しません。mock では即時削除です。
+- 複数プロセスから同じ data directory を共有する用途はサポートしません。
 
 ## ライセンス
 

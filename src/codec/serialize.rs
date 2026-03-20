@@ -9,6 +9,7 @@ use crate::{
     validation::{
         key::{validate_partition_key, validate_row_key},
         limits::validate_entity_limit_constraints,
+        property::validate_property_name,
     },
 };
 
@@ -22,14 +23,6 @@ pub(crate) fn dynamic_entity_to_body(entity: &DynamicEntity) -> Result<Bytes> {
         serde_json::to_vec(&dynamic_entity_to_value(entity)?).map_err(SerializationError::from)?;
     validate_entity_limit_constraints(entity, body.len())?;
     Ok(Bytes::from(body))
-}
-
-pub(crate) fn typed_entity_to_body<T>(entity: &T) -> Result<Bytes>
-where
-    T: TableEntity,
-{
-    let dynamic = typed_entity_to_dynamic(entity)?;
-    dynamic_entity_to_body(&dynamic)
 }
 
 pub(crate) fn typed_entity_to_dynamic<T>(entity: &T) -> Result<DynamicEntity>
@@ -163,21 +156,6 @@ fn infer_property_from_typed_json(value: Value) -> Result<Option<EntityProperty>
         )
         .into()),
     }
-}
-
-fn validate_property_name(name: &str) -> Result<()> {
-    if matches!(name, "PartitionKey" | "RowKey" | "Timestamp") {
-        return Err(ValidationError::EntityLimit(
-            "custom properties cannot overwrite system properties".to_owned(),
-        )
-        .into());
-    }
-    if name.trim().is_empty() {
-        return Err(
-            ValidationError::EntityLimit("property names cannot be empty".to_owned()).into(),
-        );
-    }
-    Ok(())
 }
 
 fn remove_system_fields(object: &mut Map<String, Value>) {

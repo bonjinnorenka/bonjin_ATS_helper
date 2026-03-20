@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 use url::Url;
 
+use super::{count_comparisons, parse_filter};
 use crate::error::ValidationError;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -120,12 +121,8 @@ pub(crate) fn validate_filter(filter: String) -> Result<String, ValidationError>
         ));
     }
 
-    let comparisons = filter.to_ascii_lowercase().match_indices(" eq ").count()
-        + filter.to_ascii_lowercase().match_indices(" ne ").count()
-        + filter.to_ascii_lowercase().match_indices(" gt ").count()
-        + filter.to_ascii_lowercase().match_indices(" ge ").count()
-        + filter.to_ascii_lowercase().match_indices(" lt ").count()
-        + filter.to_ascii_lowercase().match_indices(" le ").count();
+    let expression = parse_filter(&filter)?;
+    let comparisons = count_comparisons(&expression);
 
     if comparisons > 15 {
         return Err(ValidationError::InvalidQuery(

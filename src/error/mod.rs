@@ -136,6 +136,24 @@ pub(crate) fn ensure_status(
     .into())
 }
 
+pub(crate) fn service_error(
+    status: StatusCode,
+    code: Option<&str>,
+    message: Option<&str>,
+) -> Error {
+    let code = code.map(ToOwned::to_owned);
+    let message = message.map(ToOwned::to_owned);
+    ServiceError {
+        status,
+        kind: classify_service_error(status, code.as_deref()),
+        code,
+        request_id: None,
+        message,
+        body_snippet: None,
+    }
+    .into()
+}
+
 impl ServiceError {
     pub(crate) fn from_response(response: Response) -> Self {
         let request_id = header_string(&response.headers, "x-ms-request-id");
@@ -192,7 +210,9 @@ fn classify_service_error(status: StatusCode, code: Option<&str>) -> ServiceErro
         (StatusCode::BAD_REQUEST, _) => ServiceErrorKind::BadRequest,
         (StatusCode::UNAUTHORIZED, _) => ServiceErrorKind::Unauthorized,
         (StatusCode::FORBIDDEN, _) => ServiceErrorKind::Forbidden,
-        (StatusCode::NOT_FOUND, Some("ResourceNotFound")) => ServiceErrorKind::EntityNotFound,
+        (StatusCode::NOT_FOUND, Some("ResourceNotFound" | "EntityNotFound")) => {
+            ServiceErrorKind::EntityNotFound
+        }
         (StatusCode::NOT_FOUND, Some("TableNotFound")) => ServiceErrorKind::TableNotFound,
         (StatusCode::NOT_FOUND, _) => ServiceErrorKind::NotFound,
         (StatusCode::CONFLICT, Some("TableAlreadyExists")) => ServiceErrorKind::TableAlreadyExists,
