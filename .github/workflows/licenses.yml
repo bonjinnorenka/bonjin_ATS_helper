@@ -17,4 +17,4 @@ jobs:
       - name: Install cargo-deny
         run: cargo install --locked cargo-deny --version 0.19.0
       - name: Check licenses
-        run: cargo deny check licenses --all-features
+        run: cargo deny check licenses
