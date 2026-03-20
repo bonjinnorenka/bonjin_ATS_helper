@@ -13,9 +13,8 @@ jobs:
   cargo-deny-licenses:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: EmbarkStudios/cargo-deny-action@v2
-        with:
-          command: check
-          command-arguments: licenses
-          arguments: --all-features
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install cargo-deny
+        run: cargo install --locked cargo-deny --version 0.19.0
+      - name: Check licenses
+        run: cargo deny check licenses
