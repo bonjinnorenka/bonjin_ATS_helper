@@ -1,3 +1,5 @@
+#![allow(non_snake_case)] // Cargo package name is intentionally mixed-case
+
 pub mod mock;
 
 pub mod auth;

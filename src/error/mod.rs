@@ -120,7 +120,7 @@ pub(crate) fn ensure_status(
     expected: &[StatusCode],
     operation: &'static str,
 ) -> Result<Response> {
-    if expected.iter().any(|status| *status == response.status) {
+    if expected.contains(&response.status) {
         return Ok(response);
     }
 

@@ -396,7 +396,7 @@ impl Backend for MockBackend {
             let mut items = Vec::new();
             let mut last_scanned = None;
 
-            while let Some(((partition_key, row_key), entity)) = iter.next() {
+            for ((partition_key, row_key), entity) in iter.by_ref() {
                 last_scanned = Some((partition_key.clone(), row_key.clone()));
                 scanned += 1;
                 let matches = match &filter {
